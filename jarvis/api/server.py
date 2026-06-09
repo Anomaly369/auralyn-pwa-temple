@@ -24,6 +24,9 @@ from jarvis.core.agent import JarvisAgent, AgentResponse
 from jarvis.core.memory import MemorySystem
 from jarvis.core.tools import ToolRegistry
 from jarvis.plugins.youtube_automation import YouTubeAutomationPlugin
+from jarvis.agents.registry import AgentRegistry
+from jarvis.orchestrator.message_bus import MessageBus
+from jarvis.orchestrator.core import MultiAgentOrchestrator
 
 
 # ── Request / Response schemas ─────────────────────────────────────────────
@@ -46,6 +49,23 @@ class MemorySearchRequest(BaseModel):
 class PreferenceRequest(BaseModel):
     key: str
     value: Any
+
+
+class MultiAgentRunRequest(BaseModel):
+    goal: str
+    session_id: str | None = None
+    mode: str = "standard"
+
+
+class DebateRequest(BaseModel):
+    topic: str
+    session_id: str | None = None
+
+
+class SwarmRequest(BaseModel):
+    goal: str
+    session_id: str | None = None
+    count: int = 3
 
 
 # ── App factory ────────────────────────────────────────────────────────────
@@ -76,6 +96,28 @@ def create_app() -> FastAPI:
     MT5TradingPlugin().register(tools)
 
     agent = JarvisAgent(memory=memory, tools=tools)
+
+    # ── Multi-agent system ──────────────────────────────────────────────────
+
+    active_orchestrator_ws: dict[str, WebSocket] = {}
+
+    async def _broadcast_to_clients(event: dict):
+        dead = []
+        for sid, ws in list(active_orchestrator_ws.items()):
+            try:
+                await ws.send_json(event)
+            except Exception:
+                dead.append(sid)
+        for sid in dead:
+            active_orchestrator_ws.pop(sid, None)
+
+    message_bus = MessageBus()
+    message_bus.register_ws_callback(_broadcast_to_clients)
+
+    agent_registry = AgentRegistry(memory=memory, tools=tools, message_bus=message_bus)
+    orchestrator = MultiAgentOrchestrator(
+        registry=agent_registry, memory=memory, message_bus=message_bus
+    )
 
     # ── Startup ─────────────────────────────────────────────────────────────
 
@@ -250,5 +292,107 @@ def create_app() -> FastAPI:
     @app.get("/logs")
     async def get_logs(event_type: str | None = None, limit: int = 100):
         return {"events": await memory.get_events(event_type=event_type, limit=limit)}
+
+    # ── Multi-agent dashboard ────────────────────────────────────────────────
+
+    @app.get("/agents/dashboard", response_class=HTMLResponse)
+    async def multi_agent_dashboard(request: Request):
+        return templates.TemplateResponse("multi_agent.html", {"request": request})
+
+    # ── Agent status ─────────────────────────────────────────────────────────
+
+    @app.get("/agents")
+    async def list_agents():
+        statuses = await agent_registry.get_status_dicts()
+        perf = await memory.get_agent_performance()
+        perf_map = {p["agent_name"]: p for p in perf}
+        for s in statuses:
+            p = perf_map.get(s["name"], {})
+            tc = p.get("tasks_completed", 0)
+            total_conf = p.get("total_confidence", 0.0)
+            s["lifetime_tasks"] = tc
+            s["lifetime_avg_confidence"] = round(total_conf / tc, 3) if tc > 0 else 1.0
+            s["errors"] = p.get("errors", 0)
+        return {"agents": statuses}
+
+    @app.get("/agents/performance")
+    async def agent_performance():
+        perf = await memory.get_agent_performance()
+        return {"performance": perf}
+
+    # ── Multi-agent run ──────────────────────────────────────────────────────
+
+    @app.post("/multi-agent/run", status_code=202)
+    async def start_multi_agent_run(req: MultiAgentRunRequest):
+        session_id = req.session_id or str(uuid.uuid4())
+        valid_modes = {"standard", "debate", "swarm"}
+        mode = req.mode if req.mode in valid_modes else "standard"
+        run_id = await orchestrator.start_run(req.goal, session_id, mode=mode)
+        return {"run_id": run_id, "status": "started", "session_id": session_id, "mode": mode}
+
+    @app.get("/multi-agent/status/{run_id}")
+    async def get_run_status(run_id: str):
+        status = await orchestrator.get_status(run_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return status
+
+    @app.get("/multi-agent/runs")
+    async def list_runs(session_id: str | None = None, limit: int = 20):
+        runs = await orchestrator.list_runs(session_id=session_id, limit=limit)
+        return {"runs": runs}
+
+    @app.get("/multi-agent/messages/{run_id}")
+    async def get_run_messages(run_id: str):
+        msgs = await orchestrator.get_messages(run_id)
+        return {"messages": msgs, "count": len(msgs)}
+
+    @app.get("/multi-agent/messages")
+    async def get_all_messages(limit: int = 200):
+        msgs = message_bus.get_history(limit=limit)
+        return {"messages": msgs, "count": len(msgs)}
+
+    @app.post("/multi-agent/debate", status_code=202)
+    async def start_debate(req: DebateRequest):
+        session_id = req.session_id or str(uuid.uuid4())
+        run_id = await orchestrator.start_run(req.topic, session_id, mode="debate")
+        return {"run_id": run_id, "status": "started", "mode": "debate", "session_id": session_id}
+
+    @app.post("/multi-agent/swarm", status_code=202)
+    async def start_swarm(req: SwarmRequest):
+        session_id = req.session_id or str(uuid.uuid4())
+        run_id = await orchestrator.start_run(req.goal, session_id, mode="swarm")
+        return {
+            "run_id": run_id, "status": "started", "mode": "swarm",
+            "swarm_size": req.count, "session_id": session_id,
+        }
+
+    # ── Orchestrator WebSocket ───────────────────────────────────────────────
+
+    @app.websocket("/ws/orchestrator/{session_id}")
+    async def ws_orchestrator(websocket: WebSocket, session_id: str):
+        await websocket.accept()
+        active_orchestrator_ws[session_id] = websocket
+        try:
+            # Send initial agent statuses on connect
+            statuses = await agent_registry.get_status_dicts()
+            await websocket.send_json({"type": "agent_status_init", "agents": statuses})
+            while True:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+                action = payload.get("action", "")
+                if action == "status":
+                    statuses = await agent_registry.get_status_dicts()
+                    await websocket.send_json({"type": "agent_status", "agents": statuses})
+                elif action == "ping":
+                    await websocket.send_json({"type": "pong"})
+        except WebSocketDisconnect:
+            active_orchestrator_ws.pop(session_id, None)
+        except Exception as e:
+            active_orchestrator_ws.pop(session_id, None)
+            try:
+                await websocket.send_json({"type": "error", "content": str(e)})
+            except Exception:
+                pass
 
     return app

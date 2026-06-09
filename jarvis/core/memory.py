@@ -141,6 +141,43 @@ CREATE INDEX IF NOT EXISTS idx_log_type    ON event_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_log_session ON event_log(session_id);
 """
 
+_MULTI_AGENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     TEXT NOT NULL,
+    from_agent TEXT NOT NULL,
+    to_agent   TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    confidence REAL DEFAULT 1.0,
+    task_id    TEXT,
+    ts         REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_amsg_run ON agent_messages(run_id, ts);
+
+CREATE TABLE IF NOT EXISTS agent_performance (
+    agent_name        TEXT PRIMARY KEY,
+    tasks_completed   INTEGER DEFAULT 0,
+    total_confidence  REAL DEFAULT 0.0,
+    errors            INTEGER DEFAULT 0,
+    last_active       REAL
+);
+
+CREATE TABLE IF NOT EXISTS execution_runs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT UNIQUE NOT NULL,
+    session_id    TEXT NOT NULL,
+    goal          TEXT NOT NULL,
+    mode          TEXT DEFAULT 'standard',
+    status        TEXT DEFAULT 'running',
+    result        TEXT DEFAULT '',
+    agent_results TEXT DEFAULT '{}',
+    ts_created    REAL NOT NULL,
+    ts_completed  REAL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_session ON execution_runs(session_id, ts_created);
+"""
+
 
 # ── MemorySystem ───────────────────────────────────────────────────────────
 
@@ -156,6 +193,7 @@ class MemorySystem:
     async def init(self):
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(_SCHEMA)
+            await db.executescript(_MULTI_AGENT_SCHEMA)
             await db.commit()
 
     @asynccontextmanager
@@ -344,6 +382,117 @@ class MemorySystem:
         for e in events:
             e["payload"] = json.loads(e["payload"])
         return events
+
+    # ── Multi-agent: agent messages ────────────────────────────────────────
+
+    async def store_agent_message(self, msg_dict: dict) -> int:
+        async with self._db() as db:
+            cur = await db.execute(
+                "INSERT INTO agent_messages(run_id, from_agent, to_agent, type, content, "
+                "confidence, task_id, ts) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    msg_dict["run_id"], msg_dict["from_agent"], msg_dict["to_agent"],
+                    msg_dict["type"], msg_dict["content"], msg_dict.get("confidence", 1.0),
+                    msg_dict.get("task_id", ""), msg_dict.get("timestamp", time.time()),
+                ),
+            )
+            await db.commit()
+            return cur.lastrowid
+
+    async def get_agent_messages(self, run_id: str, limit: int = 200) -> list[dict]:
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT * FROM agent_messages WHERE run_id=? ORDER BY ts ASC LIMIT ?",
+                (run_id, limit),
+            )
+        return [dict(r) for r in rows]
+
+    # ── Multi-agent: performance ───────────────────────────────────────────
+
+    async def upsert_agent_performance(
+        self, agent_name: str, confidence: float, error: bool = False
+    ):
+        async with self._db() as db:
+            await db.execute(
+                """INSERT INTO agent_performance(agent_name, tasks_completed, total_confidence, errors, last_active)
+                   VALUES (?, 1, ?, ?, ?)
+                   ON CONFLICT(agent_name) DO UPDATE SET
+                     tasks_completed = tasks_completed + 1,
+                     total_confidence = total_confidence + excluded.total_confidence,
+                     errors = errors + excluded.errors,
+                     last_active = excluded.last_active""",
+                (agent_name, confidence, 1 if error else 0, time.time()),
+            )
+            await db.commit()
+
+    async def get_agent_performance(self) -> list[dict]:
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT * FROM agent_performance ORDER BY agent_name"
+            )
+        return [dict(r) for r in rows]
+
+    # ── Multi-agent: execution runs ────────────────────────────────────────
+
+    async def create_run(
+        self, run_id: str, session_id: str, goal: str, mode: str
+    ) -> int:
+        async with self._db() as db:
+            cur = await db.execute(
+                "INSERT INTO execution_runs(run_id, session_id, goal, mode, status, ts_created) "
+                "VALUES (?,?,?,?,'running',?)",
+                (run_id, session_id, goal, mode, time.time()),
+            )
+            await db.commit()
+            return cur.lastrowid
+
+    async def update_run(self, run_id: str, **kwargs):
+        if "agent_results" in kwargs and isinstance(kwargs["agent_results"], dict):
+            kwargs["agent_results"] = json.dumps(kwargs["agent_results"])
+        if kwargs.get("status") in ("complete", "failed") and "ts_completed" not in kwargs:
+            kwargs["ts_completed"] = time.time()
+        cols = ", ".join(f"{k}=?" for k in kwargs)
+        vals = list(kwargs.values()) + [run_id]
+        async with self._db() as db:
+            await db.execute(f"UPDATE execution_runs SET {cols} WHERE run_id=?", vals)
+            await db.commit()
+
+    async def list_runs(
+        self, session_id: str | None = None, limit: int = 20
+    ) -> list[dict]:
+        async with self._db() as db:
+            if session_id:
+                rows = await db.execute_fetchall(
+                    "SELECT * FROM execution_runs WHERE session_id=? ORDER BY ts_created DESC LIMIT ?",
+                    (session_id, limit),
+                )
+            else:
+                rows = await db.execute_fetchall(
+                    "SELECT * FROM execution_runs ORDER BY ts_created DESC LIMIT ?", (limit,)
+                )
+        runs = [dict(r) for r in rows]
+        for r in runs:
+            if r.get("agent_results"):
+                try:
+                    r["agent_results"] = json.loads(r["agent_results"])
+                except Exception:
+                    r["agent_results"] = {}
+        return runs
+
+    async def get_run(self, run_id: str) -> Optional[dict]:
+        async with self._db() as db:
+            rows = await db.execute_fetchall(
+                "SELECT * FROM execution_runs WHERE run_id=?", (run_id,)
+            )
+        if not rows:
+            return None
+        r = dict(rows[0])
+        if r.get("agent_results"):
+            try:
+                r["agent_results"] = json.loads(r["agent_results"])
+            except Exception:
+                r["agent_results"] = {}
+        return r
 
     # ── Context builder (for agent prompt injection) ───────────────────────
 
