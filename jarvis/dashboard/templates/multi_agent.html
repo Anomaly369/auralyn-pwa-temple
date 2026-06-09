@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Auralyn — Multi-Agent Command Center</title>
+<style>
+  :root {
+    --bg: #0a0a12; --surface: #12121e; --surface2: #1a1a2e;
+    --accent: #6c63ff; --accent2: #ff6584; --green: #00e676;
+    --gold: #ffd700; --text: #e0e0ff; --muted: #6b7280;
+    --border: #2a2a42; --font: 'Segoe UI', system-ui, sans-serif;
+    --strategist: #6c63ff; --researcher: #00bcd4; --builder: #ff9800;
+    --critic: #e91e63; --communicator: #4caf50;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .logo { font-size: 1.2rem; font-weight: 800; letter-spacing: 2px; color: var(--accent); text-shadow: 0 0 20px var(--accent); }
+  .logo span { color: var(--gold); }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+  .status-dot.disconnected { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .header-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .mode-group { display: flex; gap: 4px; background: var(--surface2); border-radius: 20px; padding: 3px; }
+  .mode-btn { padding: 4px 14px; border-radius: 20px; border: none; cursor: pointer; font-size: .78rem; font-weight: 600; transition: all .2s; background: transparent; color: var(--muted); }
+  .mode-btn.active { color: #fff; }
+  .mode-btn[data-mode="standard"].active { background: var(--accent); }
+  .mode-btn[data-mode="debate"].active { background: var(--accent2); }
+  .mode-btn[data-mode="swarm"].active { background: var(--gold); color: #000; }
+  .header-right { margin-left: auto; font-size: .75rem; color: var(--muted); }
+  .nav-link { color: var(--muted); text-decoration: none; font-size: .8rem; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; transition: all .2s; }
+  .nav-link:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Left — Agent Roster ─────────────────────────────────────────── */
+  .left-panel { width: 240px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  .panel-title { padding: 12px 14px 6px; font-size: .68rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted); border-bottom: 1px solid var(--border); }
+
+  .agent-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .agent-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; margin-bottom: 8px; transition: border-color .3s, box-shadow .3s; cursor: default; }
+  .agent-card.working { box-shadow: 0 0 12px var(--accent)33; }
+  .agent-card.error { border-color: var(--accent2) !important; }
+  .agent-header { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+  .agent-icon { font-size: 1.1rem; width: 22px; text-align: center; }
+  .agent-name { font-size: .82rem; font-weight: 700; flex: 1; }
+  .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background .3s; }
+  .status-indicator.working { background: var(--gold); animation: pulse 1s infinite; }
+  .status-indicator.error { background: var(--accent2); }
+  .status-indicator.idle { background: var(--muted); }
+  .agent-task { font-size: .72rem; color: var(--muted); margin-bottom: 6px; min-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conf-wrap { background: var(--bg); border-radius: 4px; height: 4px; overflow: hidden; margin-bottom: 5px; }
+  .conf-bar { height: 100%; border-radius: 4px; transition: width .5s ease; background: linear-gradient(90deg, var(--accent2) 0%, var(--gold) 50%, var(--green) 100%); }
+  .agent-stats { font-size: .68rem; color: var(--muted); display: flex; justify-content: space-between; }
+
+  .run-history { flex-shrink: 0; max-height: 160px; overflow-y: auto; border-top: 1px solid var(--border); }
+  .run-history .panel-title { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+  .run-item { padding: 8px 12px; border-bottom: 1px solid var(--border)44; font-size: .75rem; cursor: pointer; transition: background .15s; display: flex; align-items: center; gap: 7px; }
+  .run-item:hover { background: var(--surface2); }
+  .run-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .run-dot.complete { background: var(--green); }
+  .run-dot.running, .run-dot.planning, .run-dot.executing, .run-dot.evaluating, .run-dot.retrying, .run-dot.merging, .run-dot.communicating { background: var(--gold); animation: pulse .8s infinite; }
+  .run-dot.failed { background: var(--accent2); }
+  .run-dot.pending { background: var(--muted); }
+  .run-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .run-mode-badge { font-size: .65rem; padding: 1px 6px; border-radius: 8px; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); flex-shrink: 0; }
+
+  /* ── Center — Command Center ─────────────────────────────────────── */
+  .center-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  .goal-section { padding: 14px 18px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .goal-input-wrap { display: flex; gap: 10px; align-items: flex-end; }
+  .goal-input-inner { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 6px 10px; transition: border-color .2s; }
+  .goal-input-inner:focus-within { border-color: var(--accent); }
+  #goalInput { background: transparent; border: none; outline: none; resize: none; color: var(--text); font-size: .88rem; font-family: var(--font); width: 100%; min-height: 48px; max-height: 100px; line-height: 1.5; padding: 6px 4px; }
+  .launch-btn { padding: 10px 20px; background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer; font-size: .88rem; font-weight: 700; transition: all .2s; white-space: nowrap; }
+  .launch-btn:hover { background: #7c74ff; box-shadow: 0 0 16px var(--accent)66; }
+  .launch-btn:disabled { background: var(--muted); cursor: not-allowed; box-shadow: none; }
+  .mode-desc { font-size: .72rem; color: var(--muted); margin-top: 6px; }
+
+  /* Pipeline */
+  .pipeline-section { padding: 10px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .pipeline-label { font-size: .65rem; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); margin-bottom: 8px; }
+  .pipeline { display: flex; align-items: center; gap: 0; }
+  .pipe-step { display: flex; flex-direction: column; align-items: center; flex: 1; }
+  .pipe-box { padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); text-align: center; font-size: .67rem; font-weight: 600; color: var(--muted); transition: all .3s; width: 100%; }
+  .pipe-box .step-num { font-size: .6rem; opacity: .6; display: block; }
+  .pipe-box.active { border-color: var(--accent); color: var(--accent); background: var(--accent)15; box-shadow: 0 0 10px var(--accent)33; }
+  .pipe-box.done { border-color: var(--green); color: var(--green); background: var(--green)10; }
+  .pipe-arrow { color: var(--border); font-size: .7rem; padding: 0 2px; flex-shrink: 0; margin-top: -6px; }
+
+  /* Message flow */
+  .messages-section { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .msg-header { padding: 8px 18px; font-size: .65rem; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .msg-count-badge { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px; font-size: .65rem; color: var(--muted); }
+  .clear-btn { margin-left: auto; background: transparent; border: 1px solid var(--border); color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: .68rem; transition: all .2s; }
+  .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .message-stream { flex: 1; overflow-y: auto; padding: 10px 18px; display: flex; flex-direction: column; gap: 6px; }
+
+  .msg-entry { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 8px; border: 1px solid transparent; font-size: .78rem; line-height: 1.5; transition: background .15s; }
+  .msg-entry:hover { background: var(--surface2); }
+  .msg-from { font-weight: 700; white-space: nowrap; font-size: .72rem; }
+  .msg-arrow { color: var(--muted); font-size: .8rem; }
+  .msg-to { color: var(--muted); white-space: nowrap; font-size: .72rem; }
+  .msg-badge { padding: 1px 7px; border-radius: 10px; font-size: .65rem; font-weight: 600; flex-shrink: 0; }
+  .msg-badge.insight { background: var(--accent)33; color: var(--accent); border: 1px solid var(--accent)55; }
+  .msg-badge.result { background: var(--green)22; color: var(--green); border: 1px solid var(--green)44; }
+  .msg-badge.critique { background: var(--accent2)22; color: var(--accent2); border: 1px solid var(--accent2)44; }
+  .msg-badge.summary { background: var(--gold)22; color: var(--gold); border: 1px solid var(--gold)44; }
+  .msg-badge.status { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .msg-badge.request { background: var(--researcher)22; color: var(--researcher); border: 1px solid var(--researcher)44; }
+  .msg-content { flex: 1; color: var(--text); overflow: hidden; }
+  .msg-content.truncated { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .msg-conf { font-size: .65rem; color: var(--muted); white-space: nowrap; }
+  .msg-time { font-size: .62rem; color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+
+  /* Phase events */
+  .phase-event { padding: 5px 10px; border-radius: 6px; background: var(--accent)0d; border: 1px solid var(--accent)33; font-size: .74rem; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  .phase-event .phase-icon { font-size: .9rem; }
+  .phase-event.complete { background: var(--green)0d; border-color: var(--green)33; color: var(--green); }
+  .phase-event.failed { background: var(--accent2)0d; border-color: var(--accent2)33; color: var(--accent2); }
+  .phase-event.swarm { background: var(--gold)0d; border-color: var(--gold)33; color: var(--gold); }
+  .phase-event.debate { background: var(--accent2)0d; border-color: var(--accent2)33; color: var(--accent2); }
+
+  /* Final result */
+  .result-section { flex-shrink: 0; border-top: 2px solid var(--accent)44; padding: 14px 18px; max-height: 240px; overflow-y: auto; background: var(--surface)cc; }
+  .result-header { font-size: .7rem; text-transform: uppercase; letter-spacing: 1.2px; color: var(--accent); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .result-score { background: var(--green)22; color: var(--green); border: 1px solid var(--green)44; border-radius: 10px; padding: 2px 8px; font-size: .68rem; }
+  .result-body { font-size: .85rem; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+  /* Simple markdown-ish rendering */
+  .result-body strong { color: var(--gold); }
+
+  /* ── Right — Inspector ───────────────────────────────────────────── */
+  .right-panel { width: 280px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  .tab-bar { display: flex; border-bottom: 1px solid var(--border); }
+  .tab-btn { flex: 1; padding: 10px 6px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: .74rem; font-weight: 600; transition: all .2s; border-bottom: 2px solid transparent; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--accent)08; }
+  .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .tab-content.active { display: flex; }
+  .tab-inner { flex: 1; overflow-y: auto; padding: 10px; }
+
+  /* Memory tab */
+  .mem-search { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .mem-search input { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; color: var(--text); font-size: .78rem; outline: none; }
+  .mem-search input:focus { border-color: var(--accent); }
+  .mem-search button { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: .75rem; }
+  .mem-item { padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; margin-bottom: 5px; font-size: .75rem; }
+  .mem-cat { font-size: .65rem; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+  .mem-key { font-weight: 600; color: var(--text); margin-top: 2px; }
+  .mem-val { color: var(--muted); margin-top: 2px; line-height: 1.4; }
+
+  /* Performance tab */
+  .perf-agent { padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  .perf-header { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+  .perf-name { font-size: .82rem; font-weight: 700; flex: 1; }
+  .perf-tasks { font-size: .7rem; color: var(--muted); }
+  .perf-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: .72rem; }
+  .perf-label { width: 80px; color: var(--muted); flex-shrink: 0; }
+  .perf-bar-wrap { flex: 1; background: var(--bg); border-radius: 3px; height: 5px; overflow: hidden; }
+  .perf-bar { height: 100%; border-radius: 3px; transition: width .6s ease; }
+  .perf-val { width: 36px; text-align: right; color: var(--text); font-size: .7rem; }
+
+  /* Queue tab */
+  .queue-item { padding: 9px 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; font-size: .76rem; cursor: pointer; transition: all .2s; }
+  .queue-item:hover { border-color: var(--accent); background: var(--accent)08; }
+  .queue-item-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .q-mode { font-size: .65rem; padding: 1px 7px; border-radius: 8px; border: 1px solid var(--border); }
+  .q-mode.standard { color: var(--accent); border-color: var(--accent)66; }
+  .q-mode.debate { color: var(--accent2); border-color: var(--accent2)66; }
+  .q-mode.swarm { color: var(--gold); border-color: var(--gold)66; }
+  .q-goal { color: var(--text); margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-meta { font-size: .68rem; color: var(--muted); display: flex; justify-content: space-between; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Bounce dots loader */
+  .thinking { display: flex; align-items: center; gap: 5px; padding: 4px 0; }
+  .dot-loader { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: bounce .9s infinite; }
+  .dot-loader:nth-child(2) { animation-delay: .2s; }
+  .dot-loader:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
+</style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">AURALYN <span>⬡</span> COMMAND</div>
+  <div id="wsDot" class="status-dot disconnected" title="WebSocket status"></div>
+  <div class="header-center">
+    <div class="mode-group">
+      <button class="mode-btn active" data-mode="standard" onclick="setMode('standard')">Standard</button>
+      <button class="mode-btn" data-mode="debate" onclick="setMode('debate')">Debate</button>
+      <button class="mode-btn" data-mode="swarm" onclick="setMode('swarm')">Swarm</button>
+    </div>
+  </div>
+  <div class="header-right">
+    <a href="/" class="nav-link">← Single Agent</a>
+  </div>
+</header>
+
+<!-- ── Main ──────────────────────────────────────────────────────────────── -->
+<div class="main">
+
+  <!-- Left: Agent Roster -->
+  <div class="left-panel">
+    <div class="panel-title">Agent Roster</div>
+    <div class="agent-list" id="agentList">
+      <!-- Rendered by JS -->
+      <div class="thinking"><div class="dot-loader"></div><div class="dot-loader"></div><div class="dot-loader"></div></div>
+    </div>
+    <div class="run-history">
+      <div class="panel-title">Run History</div>
+      <div id="runHistoryList"><!-- filled by JS --></div>
+    </div>
+  </div>
+
+  <!-- Center: Command Center -->
+  <div class="center-panel">
+
+    <!-- Goal Input -->
+    <div class="goal-section">
+      <div class="goal-input-wrap">
+        <div class="goal-input-inner">
+          <textarea id="goalInput" placeholder="Enter your goal… e.g. Research quantum computing breakthroughs and write a summary" rows="2"></textarea>
+        </div>
+        <button class="launch-btn" id="launchBtn" onclick="launchRun()">▶ Launch</button>
+      </div>
+      <div class="mode-desc" id="modeDesc">5 agents collaborate: Strategist plans → Researcher + Builder execute in parallel → Critic evaluates → Communicator formats</div>
+    </div>
+
+    <!-- Execution Pipeline -->
+    <div class="pipeline-section">
+      <div class="pipeline-label">Execution Pipeline</div>
+      <div class="pipeline" id="pipeline">
+        <div class="pipe-step"><div class="pipe-box" id="step-planning"><span class="step-num">1</span>Strategist</div></div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-step"><div class="pipe-box" id="step-executing"><span class="step-num">2-3</span>Research+Build</div></div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-step"><div class="pipe-box" id="step-evaluating"><span class="step-num">4</span>Critic</div></div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-step"><div class="pipe-box" id="step-retrying"><span class="step-num">↺</span>Retry</div></div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-step"><div class="pipe-box" id="step-merging"><span class="step-num">5</span>Merge</div></div>
+        <div class="pipe-arrow">›</div>
+        <div class="pipe-step"><div class="pipe-box" id="step-communicating"><span class="step-num">6-7</span>Communicate</div></div>
+      </div>
+    </div>
+
+    <!-- Message Flow + Result -->
+    <div class="messages-section">
+      <div class="msg-header">
+        Message Flow
+        <span class="msg-count-badge" id="msgCount">0</span>
+        <button class="clear-btn" onclick="clearMessages()">Clear</button>
+      </div>
+      <div class="message-stream" id="messageStream">
+        <div style="color:var(--muted);font-size:.8rem;text-align:center;padding:20px;">
+          Launch a goal to see agent collaboration in real-time
+        </div>
+      </div>
+    </div>
+
+    <!-- Final Result (hidden until run completes) -->
+    <div class="result-section" id="resultSection" style="display:none;">
+      <div class="result-header">
+        ✦ Final Response
+        <span class="result-score" id="resultScore"></span>
+      </div>
+      <div class="result-body" id="resultBody"></div>
+    </div>
+
+  </div>
+
+  <!-- Right: Inspector -->
+  <div class="right-panel">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('memory')">Memory</button>
+      <button class="tab-btn" onclick="switchTab('queue')">Queue</button>
+      <button class="tab-btn" onclick="switchTab('metrics')">Metrics</button>
+    </div>
+
+    <!-- Memory Tab -->
+    <div class="tab-content active" id="tab-memory">
+      <div class="mem-search">
+        <input id="memQuery" type="text" placeholder="Search memory…" onkeydown="if(event.key==='Enter')searchMemory()"/>
+        <button onclick="searchMemory()">Go</button>
+      </div>
+      <div class="tab-inner" id="memoryList"><!-- filled by JS --></div>
+    </div>
+
+    <!-- Queue Tab -->
+    <div class="tab-content" id="tab-queue">
+      <div class="tab-inner" id="queueList"><!-- filled by JS --></div>
+    </div>
+
+    <!-- Metrics Tab -->
+    <div class="tab-content" id="tab-metrics">
+      <div class="tab-inner" id="metricsList"><!-- filled by JS --></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+const SESSION_ID = 'ma_' + Math.random().toString(36).slice(2, 10);
+let currentMode = 'standard';
+let currentRunId = null;
+let ws = null;
+let msgCount = 0;
+let pollTimer = null;
+
+const MODE_DESCRIPTIONS = {
+  standard: '5 agents collaborate: Strategist plans → Researcher + Builder execute in parallel → Critic evaluates → Communicator formats',
+  debate: 'Builder argues FOR, Critic argues AGAINST, Strategist adjudicates the winning position',
+  swarm: `${3} Researcher instances solve independently, Critic picks the best answer`,
+};
+
+const PHASE_ICONS = {
+  planning: '🧠', executing: '⚙', evaluating: '🧪', retrying: '↺',
+  merging: '⊕', communicating: '💬', complete: '✦', failed: '✗',
+};
+
+const AGENT_COLORS = {
+  strategist_agent: 'var(--strategist)', researcher_agent: 'var(--researcher)',
+  builder_agent: 'var(--builder)', critic_agent: 'var(--critic)',
+  communicator_agent: 'var(--communicator)', broadcast: 'var(--muted)',
+  orchestrator: 'var(--accent)',
+};
+
+// ── WebSocket ───────────────────────────────────────────────────────────────
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/orchestrator/${SESSION_ID}`);
+
+  ws.onopen = () => {
+    document.getElementById('wsDot').classList.remove('disconnected');
+    loadInitialData();
+  };
+
+  ws.onclose = () => {
+    document.getElementById('wsDot').classList.add('disconnected');
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      handleEvent(data);
+    } catch (_) {}
+  };
+
+  ws.onerror = () => {};
+}
+
+function handleEvent(data) {
+  const type = data.type || '';
+
+  if (type === 'agent_status_init' || type === 'agent_status') {
+    renderAgentCards(data.agents || []);
+    return;
+  }
+
+  if (type === 'agent_message') {
+    appendMessage(data);
+    return;
+  }
+
+  if (type === 'phase_change') {
+    activatePipelineStep(data.phase);
+    appendPhaseEvent(data);
+    return;
+  }
+
+  if (type === 'run_complete') {
+    handleRunComplete(data);
+    return;
+  }
+
+  if (type === 'run_failed') {
+    appendPhaseEvent({phase: 'failed', detail: data.error || 'Run failed', run_id: data.run_id});
+    document.getElementById('launchBtn').disabled = false;
+    loadRunHistory();
+    return;
+  }
+
+  if (type === 'agent_status') {
+    renderAgentCards(data.agents || []);
+    return;
+  }
+
+  if (type === 'debate_round') {
+    appendDebateEvent(data);
+    return;
+  }
+
+  if (type === 'debate_verdict') {
+    appendPhaseEvent({phase: 'complete', detail: `Debate verdict: ${data.winner?.toUpperCase()} wins — ${data.rationale || ''}`, run_id: data.run_id});
+    return;
+  }
+
+  if (type === 'swarm_vote') {
+    appendPhaseEvent({phase: 'swarm', detail: `Swarm instance ${data.instance} voted (conf: ${(data.confidence*100).toFixed(0)}%)`, run_id: data.run_id});
+    return;
+  }
+
+  if (type === 'swarm_winner') {
+    appendPhaseEvent({phase: 'complete', detail: `Swarm selected best answer (conf: ${(data.confidence*100).toFixed(0)}%)`, run_id: data.run_id});
+    return;
+  }
+}
+
+// ── Launch ──────────────────────────────────────────────────────────────────
+
+async function launchRun() {
+  const goal = document.getElementById('goalInput').value.trim();
+  if (!goal) return;
+
+  document.getElementById('launchBtn').disabled = true;
+  resetPipeline();
+  document.getElementById('resultSection').style.display = 'none';
+
+  const firstMsg = document.getElementById('messageStream');
+  firstMsg.innerHTML = '';
+  msgCount = 0;
+  document.getElementById('msgCount').textContent = '0';
+
+  let endpoint, body;
+
+  if (currentMode === 'debate') {
+    endpoint = '/multi-agent/debate';
+    body = {topic: goal, session_id: SESSION_ID};
+  } else if (currentMode === 'swarm') {
+    endpoint = '/multi-agent/swarm';
+    body = {goal, session_id: SESSION_ID, count: 3};
+  } else {
+    endpoint = '/multi-agent/run';
+    body = {goal, session_id: SESSION_ID, mode: currentMode};
+  }
+
+  try {
+    const res = await fetch(BASE + endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    currentRunId = data.run_id;
+
+    appendPhaseEvent({
+      phase: 'planning',
+      detail: `Run ${currentRunId?.slice(0,8)} started in ${currentMode} mode`,
+    });
+
+    // Start polling as fallback
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollRunStatus, 4000);
+
+  } catch (err) {
+    document.getElementById('launchBtn').disabled = false;
+    console.error('Launch failed:', err);
+  }
+}
+
+async function pollRunStatus() {
+  if (!currentRunId) return;
+  try {
+    const res = await fetch(`${BASE}/multi-agent/status/${currentRunId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.agents) renderAgentCards(data.agents);
+
+    if (data.status === 'complete' || data.status === 'failed') {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (data.status === 'complete' && data.result) {
+        showResult(data.result, null);
+      }
+      loadRunHistory();
+      document.getElementById('launchBtn').disabled = false;
+    }
+  } catch (_) {}
+}
+
+function handleRunComplete(data) {
+  showResult(data.result, data.critique_score);
+  activatePipelineStep('complete');
+  document.getElementById('launchBtn').disabled = false;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  loadRunHistory();
+  loadAgentStatuses();
+  loadMetrics();
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+
+const AGENT_META = {
+  strategist_agent: {icon: '🧠', color: 'var(--strategist)', label: 'Strategist'},
+  researcher_agent: {icon: '🔍', color: 'var(--researcher)', label: 'Researcher'},
+  builder_agent:    {icon: '🧱', color: 'var(--builder)',    label: 'Builder'},
+  critic_agent:     {icon: '🧪', color: 'var(--critic)',     label: 'Critic'},
+  communicator_agent:{icon: '💬', color: 'var(--communicator)', label: 'Communicator'},
+};
+
+function renderAgentCards(agents) {
+  const list = document.getElementById('agentList');
+  if (!agents.length) return;
+
+  let html = '';
+  for (const a of agents) {
+    const meta = AGENT_META[a.name] || {icon: '🤖', color: 'var(--accent)', label: a.name};
+    const conf = a.avg_confidence ?? a.lifetime_avg_confidence ?? 1.0;
+    const confPct = Math.round(conf * 100);
+    const wc = a.status === 'working' ? 'working' : (a.status === 'error' ? 'error' : '');
+    html += `
+    <div class="agent-card ${wc}" id="card-${a.name}" style="border-color: ${a.status === 'working' ? meta.color : ''};">
+      <div class="agent-header">
+        <span class="agent-icon">${meta.icon}</span>
+        <span class="agent-name" style="color:${meta.color}">${meta.label}</span>
+        <span class="status-indicator ${a.status}" title="${a.status}"></span>
+      </div>
+      <div class="agent-task">${escHtml(a.current_task || 'Idle')}</div>
+      <div class="conf-wrap"><div class="conf-bar" style="width:${confPct}%"></div></div>
+      <div class="agent-stats">
+        <span>${a.tasks_completed ?? 0} tasks</span>
+        <span>${confPct}% conf</span>
+      </div>
+    </div>`;
+  }
+  list.innerHTML = html;
+}
+
+function appendMessage(data) {
+  const stream = document.getElementById('messageStream');
+  const from = data.from_agent || '?';
+  const to = data.to_agent || '?';
+  const type = data.type || 'status';
+  const content = data.content || '';
+  const conf = data.confidence != null ? Math.round(data.confidence * 100) : null;
+  const ts = data.timestamp ? new Date(data.timestamp * 1000).toLocaleTimeString() : '';
+
+  const meta = AGENT_META[from] || {icon: '⬡', color: 'var(--muted)', label: from};
+  const toMeta = AGENT_META[to] || {label: to};
+
+  const entry = document.createElement('div');
+  entry.className = 'msg-entry';
+  entry.style.borderLeftColor = meta.color;
+  entry.style.borderLeftWidth = '3px';
+  entry.innerHTML = `
+    <span class="msg-from" style="color:${meta.color}">${meta.icon} ${meta.label}</span>
+    <span class="msg-arrow">→</span>
+    <span class="msg-to">${to === 'broadcast' ? '📡 all' : (toMeta.label || to)}</span>
+    <span class="msg-badge ${type}">${type}</span>
+    <span class="msg-content truncated" title="${escHtml(content)}">${escHtml(content)}</span>
+    ${conf !== null ? `<span class="msg-conf">${conf}%</span>` : ''}
+    <span class="msg-time">${ts}</span>
+  `;
+  stream.appendChild(entry);
+  stream.scrollTop = stream.scrollHeight;
+
+  msgCount++;
+  document.getElementById('msgCount').textContent = msgCount;
+}
+
+function appendPhaseEvent(data) {
+  const stream = document.getElementById('messageStream');
+  const phase = data.phase || '';
+  const detail = data.detail || phase;
+  const icon = PHASE_ICONS[phase] || '◈';
+  const cls = phase === 'complete' ? 'complete' : phase === 'failed' ? 'failed' : phase === 'swarm' ? 'swarm' : phase === 'debate' ? 'debate' : '';
+
+  const entry = document.createElement('div');
+  entry.className = `phase-event ${cls}`;
+  entry.innerHTML = `<span class="phase-icon">${icon}</span> <strong>${phase.toUpperCase()}</strong>: ${escHtml(detail)}`;
+  stream.appendChild(entry);
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function appendDebateEvent(data) {
+  const stream = document.getElementById('messageStream');
+  const pos = data.position === 'pro' ? 'PRO' : 'CON';
+  const color = data.position === 'pro' ? 'var(--builder)' : 'var(--critic)';
+  const entry = document.createElement('div');
+  entry.className = 'phase-event debate';
+  entry.style.borderLeftColor = color;
+  entry.style.borderLeftWidth = '3px';
+  entry.innerHTML = `<span class="phase-icon">⚔</span> <strong>DEBATE Round ${data.round} [${pos}]</strong> — ${escHtml((data.content || '').slice(0,120))}…`;
+  stream.appendChild(entry);
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function showResult(text, score) {
+  const sec = document.getElementById('resultSection');
+  const body = document.getElementById('resultBody');
+  const scoreBadge = document.getElementById('resultScore');
+
+  sec.style.display = 'block';
+  body.textContent = text || '(No result)';
+
+  if (score != null) {
+    scoreBadge.textContent = `Score: ${Math.round(score * 100)}%`;
+    scoreBadge.style.display = '';
+  } else {
+    scoreBadge.style.display = 'none';
+  }
+  sec.scrollTop = 0;
+}
+
+function activatePipelineStep(phase) {
+  const steps = document.querySelectorAll('.pipe-box');
+  const stepIds = ['planning','executing','evaluating','retrying','merging','communicating'];
+  const idx = stepIds.indexOf(phase);
+
+  steps.forEach((s, i) => {
+    s.classList.remove('active', 'done');
+    if (i < idx) s.classList.add('done');
+    else if (i === idx) s.classList.add('active');
+  });
+
+  if (phase === 'complete') {
+    steps.forEach(s => { s.classList.remove('active'); s.classList.add('done'); });
+  }
+}
+
+function resetPipeline() {
+  document.querySelectorAll('.pipe-box').forEach(s => s.classList.remove('active', 'done'));
+}
+
+// ── Mode switching ──────────────────────────────────────────────────────────
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  document.getElementById('modeDesc').textContent = MODE_DESCRIPTIONS[mode] || '';
+}
+
+// ── Tab switching ───────────────────────────────────────────────────────────
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    const tabs = ['memory','queue','metrics'];
+    b.classList.toggle('active', tabs[i] === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === 'tab-' + tab);
+  });
+  if (tab === 'memory') loadMemory();
+  if (tab === 'queue') loadRunHistory();
+  if (tab === 'metrics') loadMetrics();
+}
+
+// ── Data loaders ────────────────────────────────────────────────────────────
+
+async function loadInitialData() {
+  await Promise.all([loadAgentStatuses(), loadMemory(), loadRunHistory(), loadMetrics()]);
+}
+
+async function loadAgentStatuses() {
+  try {
+    const res = await fetch(`${BASE}/agents`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderAgentCards(data.agents || []);
+  } catch (_) {}
+}
+
+async function loadMemory() {
+  try {
+    const res = await fetch(`${BASE}/memory/all?limit=30`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderMemoryList(data.memories || []);
+  } catch (_) {}
+}
+
+async function searchMemory() {
+  const q = document.getElementById('memQuery').value.trim();
+  if (!q) { loadMemory(); return; }
+  try {
+    const res = await fetch(`${BASE}/memory/search`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: q, limit: 20}),
+    });
+    const data = await res.json();
+    renderMemoryList(data.results || []);
+  } catch (_) {}
+}
+
+function renderMemoryList(mems) {
+  const list = document.getElementById('memoryList');
+  if (!mems.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:.78rem;text-align:center;padding:16px;">No memories yet</div>';
+    return;
+  }
+  list.innerHTML = mems.map(m => `
+    <div class="mem-item">
+      <div class="mem-cat">${m.category || 'fact'}</div>
+      <div class="mem-key">${escHtml(m.key || '')}</div>
+      <div class="mem-val">${escHtml((m.value || '').slice(0, 120))}</div>
+    </div>`).join('');
+}
+
+async function loadRunHistory() {
+  try {
+    const res = await fetch(`${BASE}/multi-agent/runs?limit=20`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderRunHistory(data.runs || []);
+    renderQueueList(data.runs || []);
+  } catch (_) {}
+}
+
+function renderRunHistory(runs) {
+  const list = document.getElementById('runHistoryList');
+  if (!runs.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:.73rem;padding:8px 12px;">No runs yet</div>';
+    return;
+  }
+  list.innerHTML = runs.map(r => `
+    <div class="run-item" onclick="selectRun('${r.run_id}')">
+      <span class="run-dot ${r.status}"></span>
+      <span class="run-text">${escHtml((r.goal || '').slice(0, 38))}</span>
+      <span class="run-mode-badge">${r.mode || 'std'}</span>
+    </div>`).join('');
+}
+
+function renderQueueList(runs) {
+  const list = document.getElementById('queueList');
+  if (!runs.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:.78rem;text-align:center;padding:16px;">No runs yet</div>';
+    return;
+  }
+  list.innerHTML = runs.map(r => {
+    const ts = r.ts_created ? new Date(r.ts_created * 1000).toLocaleString() : '';
+    const dur = r.ts_completed && r.ts_created
+      ? `${Math.round((r.ts_completed - r.ts_created))}s`
+      : (r.status === 'running' ? 'running…' : '');
+    return `
+      <div class="queue-item" onclick="selectRun('${r.run_id}')">
+        <div class="queue-item-header">
+          <span class="run-dot ${r.status}"></span>
+          <span class="q-mode ${r.mode || 'standard'}">${r.mode || 'standard'}</span>
+          <span style="margin-left:auto;font-size:.68rem;color:var(--muted)">${dur}</span>
+        </div>
+        <div class="q-goal">${escHtml((r.goal || '').slice(0, 55))}</div>
+        <div class="q-meta"><span>${ts}</span><span>${r.run_id?.slice(0,8)}</span></div>
+      </div>`;
+  }).join('');
+}
+
+async function selectRun(runId) {
+  currentRunId = runId;
+  try {
+    const [statusRes, msgsRes] = await Promise.all([
+      fetch(`${BASE}/multi-agent/status/${runId}`),
+      fetch(`${BASE}/multi-agent/messages/${runId}`),
+    ]);
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      if (status.agents) renderAgentCards(status.agents);
+      if (status.result) showResult(status.result, null);
+      if (status.status) activatePipelineStep(status.status === 'complete' ? 'complete' : status.status);
+    }
+    if (msgsRes.ok) {
+      const msgsData = await msgsRes.json();
+      const stream = document.getElementById('messageStream');
+      stream.innerHTML = '';
+      msgCount = 0;
+      (msgsData.messages || []).forEach(m => appendMessage(m));
+    }
+  } catch (_) {}
+}
+
+async function loadMetrics() {
+  try {
+    const res = await fetch(`${BASE}/agents`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderMetrics(data.agents || []);
+  } catch (_) {}
+}
+
+function renderMetrics(agents) {
+  const list = document.getElementById('metricsList');
+  if (!agents.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:.78rem;text-align:center;padding:16px;">No metrics yet</div>';
+    return;
+  }
+
+  list.innerHTML = agents.map(a => {
+    const meta = AGENT_META[a.name] || {icon: '⬡', color: 'var(--accent)', label: a.name};
+    const conf = a.lifetime_avg_confidence ?? a.avg_confidence ?? 1.0;
+    const confPct = Math.round(conf * 100);
+    const tasks = a.lifetime_tasks ?? a.tasks_completed ?? 0;
+    const errors = a.errors ?? 0;
+    return `
+    <div class="perf-agent">
+      <div class="perf-header">
+        <span style="font-size:1rem">${meta.icon}</span>
+        <span class="perf-name" style="color:${meta.color}">${meta.label}</span>
+        <span class="perf-tasks">${tasks} runs</span>
+      </div>
+      <div class="perf-row">
+        <span class="perf-label">Confidence</span>
+        <div class="perf-bar-wrap"><div class="perf-bar" style="width:${confPct}%;background:linear-gradient(90deg,var(--accent2),var(--green))"></div></div>
+        <span class="perf-val">${confPct}%</span>
+      </div>
+      <div class="perf-row">
+        <span class="perf-label">Error rate</span>
+        <div class="perf-bar-wrap"><div class="perf-bar" style="width:${tasks>0?Math.min(100,Math.round(errors/tasks*100)):0}%;background:var(--accent2)"></div></div>
+        <span class="perf-val">${errors}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function clearMessages() {
+  document.getElementById('messageStream').innerHTML = '';
+  msgCount = 0;
+  document.getElementById('msgCount').textContent = '0';
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Textarea auto-resize ─────────────────────────────────────────────────────
+
+document.getElementById('goalInput').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+document.getElementById('goalInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) launchRun();
+});
+
+// ── Periodic refresh ─────────────────────────────────────────────────────────
+
+setInterval(loadAgentStatuses, 5000);
+setInterval(loadRunHistory, 15000);
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>

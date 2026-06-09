@@ -548,7 +548,7 @@ async def mt5_auto_scan(
 
     # Full analysis for top symbols
     if auto_execute:
-        import MetaTrader5 as mt5 as mt5_module
+        import MetaTrader5 as mt5_module
 
         trades_placed = 0
         for symbol in sym_list:

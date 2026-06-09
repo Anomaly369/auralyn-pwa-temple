@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     max_plan_steps: int = 10
     memory_retrieval_limit: int = 8
 
+    # ── Multi-Agent Orchestration ──────────────────────────────────────────
+    orchestrator_model: str = "claude-opus-4-8"
+    max_critic_retries: int = 3
+    critic_pass_threshold: float = 0.7
+    swarm_size: int = 3
+    debate_rounds: int = 2
+
 
 settings = Settings()
 
