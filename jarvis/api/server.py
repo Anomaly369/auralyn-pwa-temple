@@ -140,7 +140,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
-        return templates.TemplateResponse("index.html", {"request": request})
+        return templates.TemplateResponse(request, "index.html")
 
     # ── Health ──────────────────────────────────────────────────────────────
 
@@ -297,7 +297,7 @@ def create_app() -> FastAPI:
 
     @app.get("/agents/dashboard", response_class=HTMLResponse)
     async def multi_agent_dashboard(request: Request):
-        return templates.TemplateResponse("multi_agent.html", {"request": request})
+        return templates.TemplateResponse(request, "multi_agent.html")
 
     # ── Agent status ─────────────────────────────────────────────────────────
 
