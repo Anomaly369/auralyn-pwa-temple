@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>JARVIS — AI Operating System</title>
+<style>
+  :root {
+    --bg: #0a0a12;
+    --surface: #12121e;
+    --surface2: #1a1a2e;
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --green: #00e676;
+    --text: #e0e0ff;
+    --muted: #6b7280;
+    --border: #2a2a42;
+    --font: 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Header */
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .logo { font-size: 1.4rem; font-weight: 700; letter-spacing: 2px; color: var(--accent); text-shadow: 0 0 20px var(--accent); }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .header-info { margin-left: auto; font-size: .8rem; color: var(--muted); }
+  .mode-toggle { display: flex; gap: 4px; background: var(--surface2); border-radius: 20px; padding: 3px; }
+  .mode-btn { padding: 4px 14px; border-radius: 20px; border: none; cursor: pointer; font-size: .8rem; font-weight: 600; transition: all .2s; background: transparent; color: var(--muted); }
+  .mode-btn.active { background: var(--accent); color: #fff; }
+
+  /* Layout */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  .sidebar-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-section h3 { font-size: .7rem; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 10px; }
+  .task-list { overflow-y: auto; flex: 1; }
+  .task-item { padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: .82rem; cursor: pointer; transition: background .15s; }
+  .task-item:hover { background: var(--surface2); }
+  .task-status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+  .task-status.done { background: var(--green); }
+  .task-status.running { background: #ffd700; animation: pulse 1s infinite; }
+  .task-status.failed { background: var(--accent2); }
+  .task-status.pending { background: var(--muted); }
+  .tool-chip { display: inline-block; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; font-size: .72rem; margin: 2px; color: var(--muted); }
+
+  /* Chat pane */
+  .chat-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; gap: 12px; max-width: 840px; }
+  .msg.user { flex-direction: row-reverse; align-self: flex-end; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .85rem; font-weight: 700; flex-shrink: 0; }
+  .user .avatar { background: var(--accent2); color: #fff; }
+  .assistant .avatar { background: var(--accent); color: #fff; box-shadow: 0 0 12px var(--accent)44; }
+  .bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; line-height: 1.6; font-size: .9rem; white-space: pre-wrap; word-break: break-word; max-width: 680px; }
+  .user .bubble { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tool-calls { margin-top: 8px; font-size: .78rem; color: var(--muted); }
+  .tool-calls summary { cursor: pointer; }
+
+  /* Plan view */
+  .plan-view { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; font-size: .82rem; margin-top: 8px; }
+  .plan-step { padding: 4px 0; display: flex; align-items: center; gap: 8px; }
+  .step-icon { font-size: 1rem; width: 20px; text-align: center; }
+
+  /* Typing indicator */
+  .typing { display: flex; align-items: center; gap: 6px; padding: 10px 16px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: bounce .9s infinite; }
+  .dot:nth-child(2) { animation-delay: .2s; }
+  .dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-8px)} }
+
+  /* Input bar */
+  .input-bar { padding: 14px 20px; background: var(--surface); border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end; }
+  .input-wrap { flex: 1; background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: flex-end; padding: 4px 8px; gap: 6px; transition: border-color .2s; }
+  .input-wrap:focus-within { border-color: var(--accent); }
+  textarea { background: transparent; border: none; outline: none; resize: none; color: var(--text); font-size: .9rem; font-family: var(--font); flex: 1; padding: 8px 6px; max-height: 140px; overflow-y: auto; line-height: 1.5; }
+  .icon-btn { background: transparent; border: none; cursor: pointer; color: var(--muted); padding: 6px; border-radius: 6px; transition: color .2s, background .2s; display: flex; align-items: center; }
+  .icon-btn:hover { color: var(--text); background: var(--border); }
+  .send-btn { background: var(--accent); border: none; color: #fff; width: 42px; height: 42px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; transition: opacity .2s, transform .1s; }
+  .send-btn:hover { opacity: .85; }
+  .send-btn:active { transform: scale(.94); }
+  .send-btn:disabled { opacity: .4; cursor: default; }
+
+  /* Right panel */
+  .right-panel { width: 300px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+  .panel-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .panel-tab { flex: 1; padding: 10px; text-align: center; font-size: .78rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all .2s; }
+  .panel-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .panel-content { flex: 1; overflow-y: auto; padding: 14px; display: none; }
+  .panel-content.active { display: block; }
+  .memory-item { background: var(--surface2); border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: .8rem; }
+  .memory-key { color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+  .memory-cat { color: var(--muted); font-size: .72rem; }
+  .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .83rem; }
+  .stat-val { color: var(--accent); font-weight: 600; }
+  .search-box { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: .85rem; margin-bottom: 12px; outline: none; }
+  .search-box:focus { border-color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface2); border: 1px solid var(--accent); color: var(--text); padding: 10px 18px; border-radius: 8px; font-size: .85rem; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 999; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⬡ JARVIS</div>
+  <div class="status-dot" id="statusDot"></div>
+  <span id="statusText" style="font-size:.82rem;color:var(--muted)">Connecting…</span>
+  <div class="mode-toggle" style="margin-left:auto">
+    <button class="mode-btn active" id="btnChat" onclick="setMode('chat')">Chat</button>
+    <button class="mode-btn" id="btnTask" onclick="setMode('task')">Task</button>
+  </div>
+  <div class="header-info" id="sessionInfo"></div>
+</header>
+
+<div class="main">
+  <!-- Sidebar: task history -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>Task History</h3>
+    </div>
+    <div class="task-list" id="taskList"></div>
+
+    <div class="sidebar-section" style="margin-top:auto">
+      <h3>Active Tools</h3>
+      <div id="toolChips"></div>
+    </div>
+  </div>
+
+  <!-- Chat pane -->
+  <div class="chat-pane">
+    <div class="messages" id="messages">
+      <div class="msg assistant">
+        <div class="avatar">J</div>
+        <div>
+          <div class="bubble">Hello. I'm JARVIS — your autonomous AI assistant.
+
+I can:
+• Answer questions and reason through complex problems
+• Execute multi-step tasks autonomously using tools
+• Search the web, run Python, manage files
+• Generate and upload faceless YouTube videos
+• Remember everything across sessions
+
+Switch to <strong>Task mode</strong> for autonomous execution, or just chat here.
+
+What shall we accomplish today?</div>
+        </div>
+      </div>
+    </div>
+    <div id="typingIndicator" style="display:none;padding:0 20px 8px">
+      <div class="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    </div>
+    <div class="input-bar">
+      <div class="input-wrap">
+        <button class="icon-btn" id="micBtn" title="Voice input" onclick="startVoice()">🎤</button>
+        <textarea id="inputBox" rows="1" placeholder="Message JARVIS… (Shift+Enter for new line)" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      </div>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="right-panel">
+    <div class="panel-tabs">
+      <div class="panel-tab active" onclick="switchPanel('memory',this)">Memory</div>
+      <div class="panel-tab" onclick="switchPanel('stats',this)">Stats</div>
+      <div class="panel-tab" onclick="switchPanel('logs',this)">Logs</div>
+    </div>
+    <div class="panel-content active" id="panel-memory">
+      <input class="search-box" id="memSearch" placeholder="Search memories…" oninput="searchMemories(this.value)"/>
+      <div id="memoryList"></div>
+    </div>
+    <div class="panel-content" id="panel-stats">
+      <div id="statsContent"></div>
+    </div>
+    <div class="panel-content" id="panel-logs">
+      <div id="logsList"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const BASE = window.location.origin;
+  let sessionId = 'session_' + Math.random().toString(36).slice(2, 10);
+  let currentMode = 'chat';
+  let ws = null;
+  let currentBubble = null;
+  let currentText = '';
+
+  document.getElementById('sessionInfo').textContent = 'Session: ' + sessionId;
+
+  // ── WebSocket ──────────────────────────────────────────────────────────
+
+  function connectWS() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/${sessionId}`);
+    ws.onopen = () => {
+      document.getElementById('statusDot').style.background = 'var(--green)';
+      document.getElementById('statusText').textContent = 'Online';
+    };
+    ws.onclose = () => {
+      document.getElementById('statusDot').style.background = '#ff4444';
+      document.getElementById('statusText').textContent = 'Disconnected — reconnecting…';
+      setTimeout(connectWS, 3000);
+    };
+    ws.onerror = () => {};
+    ws.onmessage = (evt) => handleWS(JSON.parse(evt.data));
+  }
+
+  function handleWS(data) {
+    if (data.type === 'start') {
+      hideTyping();
+      currentBubble = appendBubble('assistant', '');
+      currentText = '';
+    } else if (data.type === 'token') {
+      currentText += data.content;
+      if (currentBubble) currentBubble.textContent = currentText;
+      scrollBottom();
+    } else if (data.type === 'end') {
+      currentBubble = null;
+      document.getElementById('sendBtn').disabled = false;
+      loadSidebar();
+    } else if (data.type === 'task_complete') {
+      hideTyping();
+      const bubble = appendBubble('assistant', data.content);
+      if (data.plan) appendPlan(bubble.parentElement.parentElement, data.plan);
+      if (data.tool_calls?.length) appendToolCalls(bubble.parentElement.parentElement, data.tool_calls);
+      document.getElementById('sendBtn').disabled = false;
+      loadSidebar();
+    } else if (data.type === 'error') {
+      hideTyping();
+      appendBubble('assistant', '⚠ Error: ' + data.content);
+      document.getElementById('sendBtn').disabled = false;
+    }
+  }
+
+  connectWS();
+
+  // ── Sending ────────────────────────────────────────────────────────────
+
+  function sendMessage() {
+    const box = document.getElementById('inputBox');
+    const text = box.value.trim();
+    if (!text || !ws || ws.readyState !== 1) return;
+    appendBubble('user', text);
+    box.value = '';
+    autoResize(box);
+    document.getElementById('sendBtn').disabled = true;
+    showTyping();
+    ws.send(JSON.stringify({ message: text, mode: currentMode }));
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  }
+
+  // ── Mode ──────────────────────────────────────────────────────────────
+
+  function setMode(m) {
+    currentMode = m;
+    document.getElementById('btnChat').classList.toggle('active', m === 'chat');
+    document.getElementById('btnTask').classList.toggle('active', m === 'task');
+    document.getElementById('inputBox').placeholder =
+      m === 'task'
+        ? 'Describe a task for JARVIS to execute autonomously…'
+        : 'Message JARVIS…';
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────
+
+  function appendBubble(role, text) {
+    const msgs = document.getElementById('messages');
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + role;
+    wrap.innerHTML = `<div class="avatar">${role === 'user' ? 'U' : 'J'}</div><div><div class="bubble"></div></div>`;
+    const bubble = wrap.querySelector('.bubble');
+    bubble.textContent = text;
+    msgs.appendChild(wrap);
+    scrollBottom();
+    return bubble;
+  }
+
+  function appendPlan(msgEl, plan) {
+    const el = document.createElement('div');
+    el.className = 'plan-view';
+    const icons = {done:'✓',running:'►',pending:'○',failed:'✗',skipped:'–'};
+    el.innerHTML = `<strong style="color:var(--muted);font-size:.78rem">PLAN: ${plan.goal}</strong>` +
+      plan.steps.map(s => `<div class="plan-step"><span class="step-icon">${icons[s.status]||'○'}</span>${s.title}</div>`).join('');
+    msgEl.querySelector('div').appendChild(el);
+  }
+
+  function appendToolCalls(msgEl, calls) {
+    const el = document.createElement('details');
+    el.className = 'tool-calls';
+    el.innerHTML = `<summary>${calls.length} tool call(s)</summary>` +
+      calls.map(c => `<div style="padding:4px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--accent)">⚙ ${c.tool}</span>
+        <div style="color:var(--muted);margin-top:2px">${JSON.stringify(c.input).slice(0,80)}…</div>
+      </div>`).join('');
+    msgEl.querySelector('div').appendChild(el);
+  }
+
+  function showTyping() { document.getElementById('typingIndicator').style.display = 'block'; scrollBottom(); }
+  function hideTyping() { document.getElementById('typingIndicator').style.display = 'none'; }
+  function scrollBottom() {
+    const m = document.getElementById('messages');
+    m.scrollTop = m.scrollHeight;
+  }
+
+  // ── Sidebar ───────────────────────────────────────────────────────────
+
+  async function loadSidebar() {
+    try {
+      const [tasksRes, toolsRes] = await Promise.all([
+        fetch(`${BASE}/tasks?session_id=${sessionId}&limit=20`),
+        fetch(`${BASE}/tools`),
+      ]);
+      const tasks = (await tasksRes.json()).tasks || [];
+      const tools = (await toolsRes.json()).tools || [];
+
+      const tl = document.getElementById('taskList');
+      tl.innerHTML = tasks.slice(0, 15).map(t => `
+        <div class="task-item" title="${t.description}">
+          <span class="task-status ${t.status}"></span>${t.title.slice(0,30)}
+          <div style="color:var(--muted);font-size:.72rem;margin-top:2px">${t.status}</div>
+        </div>`).join('');
+
+      const tc = document.getElementById('toolChips');
+      tc.innerHTML = tools.slice(0, 10).map(t => `<span class="tool-chip">${t.name}</span>`).join('');
+    } catch(e) {}
+  }
+
+  // ── Memory panel ──────────────────────────────────────────────────────
+
+  async function loadMemories(query = '') {
+    try {
+      let url = query
+        ? `${BASE}/memory/search`
+        : `${BASE}/memory/all?limit=30`;
+      const opts = query
+        ? { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({query, limit: 20}) }
+        : {};
+      const res = await fetch(url, opts);
+      const data = await res.json();
+      const mems = data.results || data.memories || [];
+      document.getElementById('memoryList').innerHTML = mems.length
+        ? mems.map(m => `
+            <div class="memory-item">
+              <div class="memory-key">${m.key}</div>
+              <div style="margin:4px 0">${m.value.slice(0, 120)}</div>
+              <div class="memory-cat">${m.category} · ${new Date(m.ts*1000).toLocaleDateString()}</div>
+            </div>`).join('')
+        : '<div style="color:var(--muted);font-size:.85rem">No memories yet.</div>';
+    } catch(e) {}
+  }
+
+  let memDebounce;
+  function searchMemories(q) {
+    clearTimeout(memDebounce);
+    memDebounce = setTimeout(() => loadMemories(q), 400);
+  }
+
+  // ── Stats panel ───────────────────────────────────────────────────────
+
+  async function loadStats() {
+    try {
+      const [tasks, mems, prefs] = await Promise.all([
+        fetch(`${BASE}/tasks`).then(r=>r.json()),
+        fetch(`${BASE}/memory/all?limit=1000`).then(r=>r.json()),
+        fetch(`${BASE}/preferences`).then(r=>r.json()),
+      ]);
+      const ts = tasks.tasks || [];
+      const ms = mems.memories || [];
+      const done = ts.filter(t=>t.status==='done').length;
+      document.getElementById('statsContent').innerHTML = `
+        <div class="stat-row"><span>Total Tasks</span><span class="stat-val">${ts.length}</span></div>
+        <div class="stat-row"><span>Completed</span><span class="stat-val">${done}</span></div>
+        <div class="stat-row"><span>Memories Stored</span><span class="stat-val">${ms.length}</span></div>
+        <div class="stat-row"><span>Preferences</span><span class="stat-val">${Object.keys(prefs.preferences||{}).length}</span></div>
+        <div class="stat-row"><span>Session</span><span class="stat-val" style="font-size:.72rem">${sessionId}</span></div>
+      `;
+    } catch(e) {}
+  }
+
+  // ── Logs panel ────────────────────────────────────────────────────────
+
+  async function loadLogs() {
+    try {
+      const res = await fetch(`${BASE}/logs?limit=50`);
+      const data = await res.json();
+      const events = data.events || [];
+      document.getElementById('logsList').innerHTML = events.map(e => `
+        <div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:.78rem">
+          <span style="color:var(--accent)">${e.event_type}</span>
+          <span style="color:var(--muted);float:right">${new Date(e.ts*1000).toLocaleTimeString()}</span>
+          <div style="color:var(--muted);margin-top:2px">${JSON.stringify(e.payload).slice(0,100)}</div>
+        </div>`).join('') || '<div style="color:var(--muted)">No events yet.</div>';
+    } catch(e) {}
+  }
+
+  // ── Panel switching ───────────────────────────────────────────────────
+
+  function switchPanel(name, tab) {
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+    if (name === 'memory') loadMemories();
+    if (name === 'stats') loadStats();
+    if (name === 'logs') loadLogs();
+  }
+
+  // ── Voice input ───────────────────────────────────────────────────────
+
+  async function startVoice() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const fd = new FormData();
+        fd.append('file', blob, 'audio.webm');
+        const res = await fetch(`${BASE}/voice/transcribe`, { method: 'POST', body: fd });
+        const { transcript } = await res.json();
+        if (transcript) {
+          document.getElementById('inputBox').value = transcript;
+          autoResize(document.getElementById('inputBox'));
+          toast('Transcribed: ' + transcript.slice(0, 60));
+        }
+      };
+      recorder.start();
+      toast('Recording… (click mic again to stop)');
+      document.getElementById('micBtn').onclick = () => {
+        recorder.stop();
+        document.getElementById('micBtn').onclick = startVoice;
+      };
+    } catch(e) {
+      toast('Microphone error: ' + e.message);
+    }
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────
+
+  function toast(msg) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 3000);
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────
+
+  loadSidebar();
+  loadMemories();
+  setInterval(loadSidebar, 10000);
+  setInterval(loadMemories, 30000);
+</script>
+</body>
+</html>
