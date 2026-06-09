@@ -243,16 +243,34 @@ class MemorySystem:
 
     async def search_memories(self, query: str, limit: int = 8) -> list[dict]:
         """Full-text search across all stored memories."""
-        async with self._db() as db:
-            rows = await db.execute_fetchall(
-                """SELECT m.* FROM memories m
-                   JOIN memories_fts f ON m.id = f.rowid
-                   WHERE memories_fts MATCH ?
-                   ORDER BY m.confidence DESC, m.ts DESC
-                   LIMIT ?""",
-                (query, limit),
-            )
-        return [dict(r) for r in rows]
+        # Sanitize query for FTS5: strip special operators and wrap words in quotes
+        safe_query = self._sanitize_fts_query(query)
+        if not safe_query:
+            return []
+        try:
+            async with self._db() as db:
+                rows = await db.execute_fetchall(
+                    """SELECT m.* FROM memories m
+                       JOIN memories_fts f ON m.id = f.rowid
+                       WHERE memories_fts MATCH ?
+                       ORDER BY m.confidence DESC, m.ts DESC
+                       LIMIT ?""",
+                    (safe_query, limit),
+                )
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _sanitize_fts_query(query: str) -> str:
+        """Convert a natural-language string to a safe FTS5 query."""
+        import re
+        # Keep only alphanumeric words (3+ chars) and join with OR
+        words = re.findall(r'[a-zA-Z0-9]{3,}', query)
+        if not words:
+            return ""
+        # Quote each word so FTS5 treats it as a literal token
+        return " OR ".join(f'"{w}"' for w in words[:8])
 
     async def get_memories_by_category(
         self, category: str, limit: int = 20
